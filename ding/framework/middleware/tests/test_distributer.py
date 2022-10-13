@@ -14,6 +14,41 @@ from ding.framework.parallel import Parallel
 from ding.utils.default_helper import set_pkg_seed
 from os import path
 
+from ding.framework.middleware.collector import TransitionList
+from ding.framework.context import Context
+from typing import Union, Dict, List, Any
+import treetensor.torch as ttorch
+import dataclasses
+from ditk import logging
+import multiprocessing as mp
+
+
+@dataclasses.dataclass
+class OnlineRLContextLearnerTest(Context):
+    total_step: int = 0
+    env_step: int = 0
+    env_episode: int = 0
+    train_iter: int = 0
+    trajectories: List = None
+    episodes: List = None
+    trajectory_end_idx: List = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        self.keep(
+            'env_step', 'env_episode', 'train_iter', 'last_eval_iter', 'trajectories', 'episodes', 'trajectory_end_idx'
+        )
+
+    @classmethod
+    def set_method(cls, obj: Any, key: str, value: Any):
+        if key == "trajectory_end_idx" or key == "trajectories" or key == "episodes":
+            v = getattr(obj, key, [])
+            if v is None:
+                v = []
+            v.extend(value)
+            setattr(obj, key, v)
+        else:
+            setattr(obj, key, value)
+
 
 def context_exchanger_main():
     with task.start(ctx=OnlineRLContext()):
@@ -221,3 +256,87 @@ def model_exchanger_main_with_model_loader():
 @pytest.mark.unittest
 def test_model_exchanger_with_model_loader():
     Parallel.runner(n_parallel_workers=2, startup_interval=0)(model_exchanger_main_with_model_loader)
+
+
+COLLECTOR_PROCESS_NUM = 5
+
+
+def context_exchanger_multiple_collectors():
+    ENV_NUM = 4
+    STEPS_NUM = 10
+    if task.router.node_id == 0:
+        with task.start(ctx=OnlineRLContextLearnerTest()):
+            task.add_role(task.role.LEARNER)
+
+            def learner_context(ctx: OnlineRLContextLearnerTest):
+                yield
+                if ctx.train_iter == STEPS_NUM - 1:
+                    assert len(ctx.trajectories) == COLLECTOR_PROCESS_NUM * STEPS_NUM * ENV_NUM
+                    assert len(ctx.trajectory_end_idx) == COLLECTOR_PROCESS_NUM * STEPS_NUM * ENV_NUM
+                    assert len(ctx.episodes) == COLLECTOR_PROCESS_NUM * STEPS_NUM
+                    assert ctx.env_step == COLLECTOR_PROCESS_NUM * STEPS_NUM * ENV_NUM
+                    assert ctx.env_episode == COLLECTOR_PROCESS_NUM * STEPS_NUM
+
+                ctx.train_iter += 1
+
+            task.use(ContextExchanger(skip_n_iter=1, debug=True, ctx_set_method=OnlineRLContextLearnerTest.set_method))
+            task.use(learner_context)
+
+            task.run(max_step=STEPS_NUM, sync_step_by_step=True)
+    else:
+        with task.start(ctx=OnlineRLContext()):
+            task.add_role(task.role.COLLECTOR)
+
+            def collector_context(ctx: OnlineRLContext):
+                if ctx.total_step > 0:
+                    assert ctx.train_iter > 0
+                yield
+                transitionlist = TransitionList(ENV_NUM)
+                for env_id in range(ENV_NUM):
+                    transition = ttorch.as_tensor(
+                        {
+                            'done': False,
+                            'trajectories': np.random.rand(task.router.node_id, COLLECTOR_PROCESS_NUM)
+                        }
+                    )
+                    if env_id == ENV_NUM - 1:
+                        transition.done = True
+                    transitionlist.append(env_id, transition)
+                ctx.trajectories, ctx.trajectory_end_idx = transitionlist.to_trajectories()
+                ctx.episodes = transitionlist.to_episodes()
+                ctx.env_step += 4
+                ctx.env_episode += 1
+
+            task.use(ContextExchanger(skip_n_iter=1, debug=True))
+            task.use(collector_context)
+            task.run(max_step=STEPS_NUM, sync_step_by_step=True)
+
+
+def run_task(rank):
+    listen_to = "127.0.0.1"
+    port = int("5051{}".format(rank))
+    if rank != 0:
+        label = 'collector'
+        attach_to = ["tcp://127.0.0.1:50510"]
+    else:
+        label = 'learner'
+        attach_to = []
+
+    Parallel.runner(
+        node_ids=rank,
+        n_parallel_workers=1,
+        protocol="tcp",
+        topology="star",
+        attach_to=attach_to,
+        address=listen_to,
+        ports=port,
+        labels=label,
+        world_size=COLLECTOR_PROCESS_NUM + 1
+    )(context_exchanger_multiple_collectors)
+
+
+@pytest.mark.unittest
+def test_context_exchanger_multiple_collectors():
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(processes=COLLECTOR_PROCESS_NUM + 1) as pool:
+        pool.map(run_task, range(COLLECTOR_PROCESS_NUM + 1))
