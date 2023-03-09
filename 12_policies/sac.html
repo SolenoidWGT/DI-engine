@@ -345,44 +345,6 @@ We configure <code class="docutils literal notranslate"><span class="pre">model.
 <section id="pseudocode">
 <h2>Pseudocode<a class="headerlink" href="#pseudocode" title="Permalink to this headline">¶</a></h2>
 <img alt="../_images/SAC-algorithm.png" class="align-center" src="../_images/SAC-algorithm.png" />
-<div class="math notranslate nohighlight">
-\[ \begin{align}\begin{aligned}:nowrap:\\\begin{algorithm}[H]
-    \caption{Soft Actor-Critic}
-    \label{alg1}
-\begin{algorithmic}[1]
-    \STATE Input: initial policy parameters $\theta$, Q-function parameters $\phi_1$, $\phi_2$, empty replay buffer $\mathcal{D}$
-    \STATE Set target parameters equal to main parameters $\phi_{\text{targ},1} \leftarrow \phi_1$, $\phi_{\text{targ},2} \leftarrow \phi_2$
-    \REPEAT
-        \STATE Observe state $s$ and select action $a \sim \pi_{\theta}(\cdot|s)$
-        \STATE Execute $a$ in the environment
-        \STATE Observe next state $s'$, reward $r$, and done signal $d$ to indicate whether $s'$ is terminal
-        \STATE Store $(s,a,r,s',d)$ in replay buffer $\mathcal{D}$
-        \STATE If $s'$ is terminal, reset environment state.
-        \IF{it's time to update}
-            \FOR{$j$ in range(however many updates)}
-                \STATE Randomly sample a batch of transitions, $B = \{ (s,a,r,s',d) \}$ from $\mathcal{D}$
-                \STATE Compute targets for the Q functions:
-                \begin{align*}
-                    y (r,s',d) &amp;= r + \gamma (1-d) \left(\min_{i=1,2} Q_{\phi_{\text{targ}, i}} (s', \tilde{a}') - \alpha \log \pi_{\theta}(\tilde{a}'|s')\right), &amp;&amp; \tilde{a}' \sim \pi_{\theta}(\cdot|s')
-                \end{align*}
-                \STATE Update Q-functions by one step of gradient descent using
-                \begin{align*}
-                    &amp; \nabla_{\phi_i} \frac{1}{|B|}\sum_{(s,a,r,s',d) \in B} \left( Q_{\phi_i}(s,a) - y(r,s',d) \right)^2 &amp;&amp; \text{for } i=1,2
-                \end{align*}
-                \STATE Update policy by one step of gradient ascent using
-                \begin{equation*}
-                    \nabla_{\theta} \frac{1}{|B|}\sum_{s \in B} \Big(\min_{i=1,2} Q_{\phi_i}(s, \tilde{a}_{\theta}(s)) - \alpha \log \pi_{\theta} \left(\left. \tilde{a}_{\theta}(s) \right| s\right) \Big),
-                \end{equation*}
-                where $\tilde{a}_{\theta}(s)$ is a sample from $\pi_{\theta}(\cdot|s)$ which is differentiable wrt $\theta$ via the reparametrization trick.
-                \STATE Update target networks with
-                \begin{align*}
-                    \phi_{\text{targ},i} &amp;\leftarrow \rho \phi_{\text{targ}, i} + (1-\rho) \phi_i &amp;&amp; \text{for } i=1,2
-                \end{align*}
-            \ENDFOR
-        \ENDIF
-    \UNTIL{convergence}
-\end{algorithmic}
-\end{algorithm}\end{aligned}\end{align} \]</div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Compared with the vanilla version, we only optimize q network and actor network in our second implementation version.</p>
@@ -390,8 +352,8 @@ We configure <code class="docutils literal notranslate"><span class="pre">model.
 </section>
 <section id="extensions">
 <h2>Extensions<a class="headerlink" href="#extensions" title="Permalink to this headline">¶</a></h2>
-<dl>
-<dt>SAC can be combined with:</dt><dd><ul>
+<p>SAC can be combined with:</p>
+<ul>
 <li><p>Auto alpha strategy</p>
 <blockquote>
 <div><p><a class="reference external" href="https://arxiv.org/abs/1702.08165">Reinforcement Learning with Deep Energy-Based Policies</a> proposes entropy coefficient <span class="math notranslate nohighlight">\(\alpha\)</span> used to determine the relative importance of entropy and reward.
@@ -400,8 +362,6 @@ Since we implement auto alpha strategy depending on maximum entropy through conf
 </div></blockquote>
 </li>
 </ul>
-</dd>
-</dl>
 </section>
 <section id="implementation">
 <h2>Implementation<a class="headerlink" href="#implementation" title="Permalink to this headline">¶</a></h2>
@@ -730,10 +690,9 @@ Since we implement auto alpha strategy depending on maximum entropy through conf
 </dl>
 </dd></dl>
 
-<p>We take the second version implementation(only predict soft Q function) as an example to introduce SAC algorithm:</p>
-<p>SAC model includes soft Q network and Policy network:</p>
-<blockquote>
-<div><p>Initialization Model.</p>
+<p>We take the second version implementation (only predict soft Q function) as an example to introduce SAC algorithm:</p>
+<p><strong>Basic Actor-Critic Definition</strong></p>
+<p>Initialization Model.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># build network</span>
 <span class="bp">self</span><span class="o">.</span><span class="n">_policy_net</span> <span class="o">=</span> <span class="n">PolicyNet</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_obs_shape</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_act_shape</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_policy_embedding_size</span><span class="p">)</span>
 
@@ -744,10 +703,9 @@ Since we implement auto alpha strategy depending on maximum entropy through conf
     <span class="bp">self</span><span class="o">.</span><span class="n">_soft_q_net</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">ModuleList</span><span class="p">()</span>
     <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_soft_q_net</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">SoftQNet</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_obs_shape</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_act_shape</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_soft_q_embedding_size</span><span class="p">))</span>
-
-<span class="n">Soft</span> <span class="n">Q</span> <span class="n">prediction</span> <span class="kn">from</span> <span class="nn">soft</span> <span class="n">Q</span> <span class="n">network</span><span class="p">:</span>
 </pre></div>
 </div>
+<p>Soft Q prediction from soft Q network</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">compute_critic_q</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inputs</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
     <span class="n">action</span> <span class="o">=</span> <span class="n">inputs</span><span class="p">[</span><span class="s1">&#39;action&#39;</span><span class="p">]</span>
     <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">action</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
@@ -757,7 +715,7 @@ Since we implement auto alpha strategy depending on maximum entropy through conf
     <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;q_value&#39;</span><span class="p">:</span> <span class="n">q_value</span><span class="p">}</span>
 </pre></div>
 </div>
-<p>Action prediction from policy network:</p>
+<p>Action prediction from policy network</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">compute_actor</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">deterministic_eval</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">epsilon</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
     <span class="n">mean</span><span class="p">,</span> <span class="n">log_std</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_policy_net_forward</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
     <span class="n">std</span> <span class="o">=</span> <span class="n">log_std</span><span class="o">.</span><span class="n">exp</span><span class="p">()</span>
@@ -788,10 +746,8 @@ This is equal to <code class="docutils literal notranslate"><span class="pre">lo
 Then, the action is squashed by <span class="math notranslate nohighlight">\(\tanh(\text{mean})\)</span>, and the log-likelihood of action has a simple form <span class="math notranslate nohighlight">\(\log \pi(\mathbf{a} \mid \mathbf{s})=\log \mu(\mathbf{u} \mid \mathbf{s})-\sum_{i=1}^{D} \log \left(1-\tanh ^{2}\left(u_{i}\right)\right)\)</span>.
 In particular, the <code class="docutils literal notranslate"><span class="pre">std</span></code> in SAC is predicted from observation, which is different from PPO(learnable parameter) and TD3(heuristic parameter).</p>
 </div>
-</div></blockquote>
-<p>Entropy-Regularized Reinforcement Learning as follows:</p>
-<blockquote>
-<div><p>Entropy in target q value.</p>
+<p><strong>Entropy-Regularized Reinforcement Learning as follows</strong></p>
+<p>Entropy in target q value.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># target q value. SARSA: first predict next action, then calculate next q value</span>
 <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
     <span class="p">(</span><span class="n">mu</span><span class="p">,</span> <span class="n">sigma</span><span class="p">)</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_learn_model</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">next_obs</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;compute_actor&#39;</span><span class="p">)[</span><span class="s1">&#39;logit&#39;</span><span class="p">]</span>
@@ -854,10 +810,8 @@ In particular, the <code class="docutils literal notranslate"><span class="pre">
 <p class="admonition-title">Note</p>
 <p>We implement reparameterization trick trough <span class="math notranslate nohighlight">\((\text{mean} + \text{std} * \mathcal{N}(0,1))\)</span>. In particular, the gradient back propagation for <code class="docutils literal notranslate"><span class="pre">sigma</span></code> is through <code class="docutils literal notranslate"><span class="pre">log_prob</span></code> in policy loss.</p>
 </div>
-</div></blockquote>
-<p>Auto alpha strategy</p>
-<blockquote>
-<div><p>Alpha initialization through log action shape.</p>
+<p><strong>Auto alpha strategy</strong></p>
+<p>Alpha initialization through log action shape.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cfg</span><span class="o">.</span><span class="n">learn</span><span class="o">.</span><span class="n">is_auto_alpha</span><span class="p">:</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">_target_entropy</span> <span class="o">=</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cfg</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">action_shape</span><span class="p">)</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">_log_alpha</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">_cfg</span><span class="o">.</span><span class="n">learn</span><span class="o">.</span><span class="n">alpha</span><span class="p">]))</span>
@@ -880,7 +834,6 @@ In particular, the <code class="docutils literal notranslate"><span class="pre">
     <span class="bp">self</span><span class="o">.</span><span class="n">_alpha</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_log_alpha</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">exp</span><span class="p">()</span>
 </pre></div>
 </div>
-</div></blockquote>
 </section>
 <section id="benchmark">
 <h2>Benchmark<a class="headerlink" href="#benchmark" title="Permalink to this headline">¶</a></h2>
